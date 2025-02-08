@@ -3,8 +3,8 @@ pragma solidity ^0.8.0;
 
 contract CoinFlip {
     address public owner;
-    uint public feePercentage = 1; // 1% fee from each bet
-    uint public nextBetId = 1; // Unique bet ID tracker
+    uint private feePercentage = 1; // 1% fee from each bet
+    uint private nextBetId = 1; // Unique bet ID tracker
 
     enum BetChoice { Black, White }
     enum BetStatus { InQueue, Won, Lost }
@@ -15,50 +15,58 @@ contract CoinFlip {
         uint amount;
         BetChoice choice;
         BetStatus status;
+        BetChoice winnerChoice;
+        uint payout;
+        bytes32 betHash;
     }
 
-    Bet[] public betQueue;
-    mapping(uint => Bet) public allBets; // Store bets by ID
-    uint public totalPoolBalance;
-    uint public totalCollectedFees;
+    Bet[] private betQueue;
+    mapping(uint => Bet) private allBets; // Store bets by ID
+    mapping(bytes32 => Bet) private betByHash;
+    mapping(address => bytes32[]) private playerBetHashes;
+    uint private totalPoolBalance;
 
-    event BetPlaced(uint indexed betId, address indexed player, uint amount, BetChoice choice, uint queuePosition);
-    event BetResolved(uint indexed betId, address indexed player, BetStatus result);
-    event BetWaiting(uint indexed betId, address indexed player, uint amount, BetChoice choice, uint queuePosition);
+    event BetPlaced(uint indexed betId, address indexed player, uint amount, BetChoice choice, uint queuePosition, bytes32 betHash);
+    event BetResolved(uint indexed betId, address indexed player, BetChoice choice, BetChoice winnerChoice, BetStatus result, uint payout, uint amountSent);
 
     constructor() {
         owner = msg.sender;
     }
 
-    // Player places a bet on Black
-    function betBlack() public payable {
+    function betBlack() public payable returns (bytes32) {
         require(msg.value > 0, "Bet must be greater than 0");
-        placeBet(msg.sender, msg.value, BetChoice.Black);
+        return placeBet(msg.sender, BetChoice.Black);
+    }
+    
+    function betWhite() public payable returns (bytes32) {
+        require(msg.value > 0, "Bet must be greater than 0");
+        return placeBet(msg.sender, BetChoice.White);
     }
 
-    // Player places a bet on White
-    function betWhite() public payable {
+    function placeBet(address player, BetChoice choice) private returns (bytes32) {
         require(msg.value > 0, "Bet must be greater than 0");
-        placeBet(msg.sender, msg.value, BetChoice.White);
-    }
 
-    function placeBet(address player, uint amount, BetChoice choice) private {
-        uint fee = (amount * feePercentage) / 100;
-        uint betAmount = amount - fee;
+        uint fee = (msg.value * feePercentage) / 100;
+        uint betAmount = msg.value; // Keep original bet amount
 
-        totalCollectedFees += fee; // Store the fee for contract owner
-        totalPoolBalance += betAmount;
+        payable(owner).transfer(fee); // Send fee to owner immediately
+        totalPoolBalance += (msg.value - fee); // Add remaining amount to pool
 
-        Bet memory newBet = Bet(nextBetId, player, betAmount, choice, BetStatus.InQueue);
+        bytes32 betHash = keccak256(abi.encodePacked(player, nextBetId, block.timestamp));
+
+        Bet memory newBet = Bet(nextBetId, player, betAmount, choice, BetStatus.InQueue, BetChoice.Black, 0, betHash);
         allBets[nextBetId] = newBet;
+        betByHash[betHash] = newBet;
+        playerBetHashes[player].push(betHash);
         betQueue.push(newBet);
 
         uint queuePosition = betQueue.length;
 
-        emit BetPlaced(nextBetId, player, betAmount, choice, queuePosition);
+        emit BetPlaced(nextBetId, player, betAmount, choice, queuePosition, betHash);
         nextBetId++;
 
-        resolveBets(); // Check if any bets can be processed
+        resolveBets();
+        return betHash;
     }
 
     function resolveBets() private {
@@ -77,19 +85,25 @@ contract CoinFlip {
         uint betAmount = bet.amount;
         uint payout = betAmount * 2;
 
-        // Simulating coin flip (should use Chainlink VRF for true randomness)
-        uint rand = uint(keccak256(abi.encodePacked(block.timestamp, bet.player))) % 2;
-        bool playerWins = (rand == 0);
+        uint256 random = randomNumber(bet.player, msg.sender);
+        BetChoice winnerChoice = (random % 2 == 0) ? BetChoice.Black : BetChoice.White;
+        bool playerWins = (bet.choice == winnerChoice);
 
         if (playerWins) {
             payable(bet.player).transfer(payout);
             bet.status = BetStatus.Won;
+            bet.payout = payout;
             totalPoolBalance -= payout;
         } else {
             bet.status = BetStatus.Lost;
+            bet.payout = 0;
         }
+        bet.winnerChoice = winnerChoice;
 
-        emit BetResolved(bet.id, bet.player, bet.status);
+        allBets[bet.id] = bet;
+        betByHash[bet.betHash] = bet;
+        
+        emit BetResolved(bet.id, bet.player, bet.choice, winnerChoice, bet.status, bet.payout, msg.value);
         removeFirstBet();
     }
 
@@ -100,71 +114,32 @@ contract CoinFlip {
         betQueue.pop();
     }
 
-    function getPoolBalance() public view returns (uint) {
-        return totalPoolBalance;
+    function getBetStatus(bytes32 betHash) public view returns (bytes32, address, string memory, string memory, uint) {
+        require(betByHash[betHash].id != 0, "Bet not found");
+        Bet memory bet = betByHash[betHash];
+
+        string memory choiceString = bet.choice == BetChoice.Black ? "Black" : "White";
+        string memory statusString;
+        if (bet.status == BetStatus.InQueue) statusString = "InQueue";
+        else if (bet.status == BetStatus.Won) statusString = "Won";
+        else statusString = "Lost";
+
+        return (bet.betHash, bet.player, choiceString, statusString, bet.amount);
     }
 
-    function getBetStatus(uint betId) public view returns (string memory) {
-        require(allBets[betId].player != address(0), "Invalid bet ID");
-        Bet storage bet = allBets[betId];
-
-        string memory queueInfo = "";
-        if (bet.status == BetStatus.InQueue) {
-            uint queuePosition = getQueuePosition(betId);
-            queueInfo = string(abi.encodePacked(
-                "Bet is in queue. ID: ", uintToString(bet.id),
-                ", Queue Position: ", uintToString(queuePosition),
-                "."
-            ));
-        }
-
-        if (bet.status == BetStatus.Won) {
-            return string(abi.encodePacked(
-                "Bet ID: ", uintToString(bet.id), 
-                ". Won ", uintToString(bet.amount * 2), " ETH."
-            ));
-        } else if (bet.status == BetStatus.Lost) {
-            return string(abi.encodePacked(
-                "Bet ID: ", uintToString(bet.id), 
-                ". Lost ", uintToString(bet.amount), " ETH."
-            ));
-        } else {
-            return queueInfo;
-        }
+    function getAllBets() public view returns (bytes32[] memory) {
+        return playerBetHashes[msg.sender];
     }
 
-    function getQueuePosition(uint betId) public view returns (uint) {
-        for (uint i = 0; i < betQueue.length; i++) {
-            if (betQueue[i].id == betId) {
-                return i + 1; // Position in queue (1-based index)
-            }
-        }
-        return 0; // Not in queue
-    }
-
-    function uintToString(uint v) private pure returns (string memory) {
-        if (v == 0) {
-            return "0";
-        }
-        uint len;
-        uint temp = v;
-        while (temp != 0) {
-            len++;
-            temp /= 10;
-        }
-        bytes memory bstr = new bytes(len);
-        uint k = len;
-        while (v != 0) {
-            k = k - 1;
-            bstr[k] = bytes1(uint8(48 + v % 10));
-            v /= 10;
-        }
-        return string(bstr);
-    }
-
-    function withdrawFees() public {
-        require(msg.sender == owner, "Only owner can withdraw fees");
-        payable(owner).transfer(totalCollectedFees);
-        totalCollectedFees = 0;
+    function randomNumber(address player, address sender) internal view returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(
+            block.timestamp,
+            block.number,
+            blockhash(block.number - 1),
+            player,
+            sender,
+            address(this).balance,
+            gasleft()
+        )));
     }
 }
