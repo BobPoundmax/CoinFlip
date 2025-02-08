@@ -1,6 +1,44 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+/*
+Extended MIT License with Revenue Sharing Clause
+--------------------------------------------------
+
+Copyright (c) 2025 Ivan Vinnikov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+1. The above copyright notice and this permission notice shall be included
+   in all copies or substantial portions of the Software.
+
+2. Revenue Sharing Requirement:
+   If this Software or any derivative work generates revenue through yield
+   farming, staking, transaction fees, or any similar mechanism, the entity
+   using this Software or any derivative work thereof is required to transfer
+   1% of the total generated revenue to the following wallet address:
+   
+       0x9e787a20B2A328d54F98B63469824eDf0d9FF546
+   
+   This payment must be made at least once per month. The entity using the
+   Software may establish additional commission or fee structures as desired;
+   however, the revenue sharing obligation defined in this section shall always
+   remain in effect and must be fulfilled independently of any other fees imposed.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
 contract CoinFlip {
     address public owner;
     uint private feePercentage = 1; // 1% fee from each bet
